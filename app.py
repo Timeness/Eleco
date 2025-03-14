@@ -152,6 +152,21 @@ async def approveHandler(app: Client, message: Message):
 
     await message.reply(f"✅ User `{user_id}` has been approved.")
 
+async def cleardbHandler(app: Client, message: Message):
+    if message.from_user.id not in Config.ADMIN_IDS:
+        await message.reply("❌ You are not authorized to clear the database.")
+        return
+
+    if os.path.exists(DATABASE_FILE):
+        os.remove(DATABASE_FILE)
+    if os.path.exists(REMOVED_USERS_FILE):
+        os.remove(REMOVED_USERS_FILE)
+
+    save_data(DATABASE_FILE, {})
+    save_data(REMOVED_USERS_FILE, {})
+
+    await message.reply("✅ Both databases have been cleared successfully!")
+
 async def preCheckout_queryHandler(app: Client, query: PreCheckoutQuery) -> None:
     await query.answer(True)
 
@@ -163,6 +178,7 @@ app.add_handler(MessageHandler(startHandler, filters.command("start")))
 app.add_handler(MessageHandler(farmHandler, filters.command("farm")))
 app.add_handler(MessageHandler(mylogsHandler, filters.command("mylogs")))
 app.add_handler(MessageHandler(approveHandler, filters.command("approve")))
+app.add_handler(MessageHandler(cleardbHandler, filters.command("cleardb")))
 app.add_handler(PreCheckoutQueryHandler(preCheckout_queryHandler))
 app.add_handler(MessageHandler(successPays, filters.successful_payment))
 
