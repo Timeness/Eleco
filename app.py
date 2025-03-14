@@ -46,26 +46,68 @@ removed_users = load_data(REMOVED_USERS_FILE)
 def generate_transaction_hash():
     return ''.join(random.choices(string.ascii_letters + string.digits, k=10))
 
+async def get_creation_date(userID: int) -> str:
+    url = "https://restore-access.indream.app/regdate"
+    headers = {
+        "accept": "*/*",
+        "content-type": "application/x-www-form-urlencoded",
+        "user-agent": "Nicegram/92 CFNetwork/1390 Darwin/22.0.0",
+        "x-api-key": "e758fb28-79be-4d1c-af6b-066633ded128",
+        "accept-language": "en-US,en;q=0.9"
+    }
+    data = {"telegramId": userID}
+
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, headers=headers, json=data) as response:
+            try:
+                res_json = await response.json()
+                if 'data' in res_json and 'date' in res_json['data']:
+                    return res_json['data']['date']
+            except Exception as e:
+                print(f"Error: {e}")
+    
+    return "N/A"
+
+# Function to check user's join date and block users who are under 2 years old
+async def checkUserJoin(userID: int):
+    join_date = await get_creation_date(userID)
+
+    if join_date != "N/A":
+        join_year, join_month = map(int, join_date.split('-'))
+        join_date_obj = datetime(join_year, join_month, 1)
+
+        now = datetime.now()
+        diff_years = now.year - join_date_obj.year
+        diff_months = now.month - join_date_obj.month
+
+        if diff_months < 0:
+            diff_years -= 1
+            diff_months += 12
+
+        if diff_years < 2:
+            removed_users[str(userID)] = {"blocked": True}
+            save_data(REMOVED_USERS_FILE, removed_users)
+            return False  # User is under 2 years old, block them
+
+        return True  # User is older than 2 years
+    else:
+        return False  # Failed to retrieve join date
+
 async def startHandler(app: Client, message: Message):
     user_id = str(message.from_user.id)
-    args = message.command[1] if len(message.command) > 1 else None
 
     if user_id in removed_users:
         await message.reply("❌ You are permanently blocked from using this bot.")
         return
 
-    if user_id in database:
-        await message.reply("✅ You are already approved to use the bot.")
-        return
+    is_eligible = await checkUserJoin(message.from_user.id)
 
-    if args == Config.REFERRAL_CODE:
+    if is_eligible:
         database[user_id] = {"approved": True, "transactions": []}
         save_data(DATABASE_FILE, database)
         await message.reply("✅ You have been approved to use the Stars Farming Bot!")
     else:
-        removed_users[user_id] = {"blocked": True}
-        save_data(REMOVED_USERS_FILE, removed_users)
-        await message.reply("❌ You must start the bot using the special referral link.\n\nYou are now permanently blocked from using this bot.")
+        await message.reply("❌ You must be at least 2 years old on Telegram to use this bot.\nYou are now permanently blocked from using this bot.")
         return
 
 async def farmHandler(app: Client, message: Message):     
@@ -152,6 +194,26 @@ async def approveHandler(app: Client, message: Message):
 
     await message.reply(f"✅ User `{user_id}` has been approved.")
 
+async def unblockHandler(app: Client, message: Message):
+    if message.from_user.id not in Config.ADMIN_IDS:
+        await message.reply("❌ You are not authorized to unblock users.")
+        return
+
+    if len(message.command) < 2:
+        await message.reply("⚠️ Please provide a user ID to unblock.\nExample: `/unblock 123456789`")
+        return
+
+    user_id = message.command[1]
+
+    if user_id not in removed_users:
+        await message.reply(f"❌ User `{user_id}` is not in the blocked list.")
+        return
+
+    del removed_users[user_id]
+    save_data(REMOVED_USERS_FILE, removed_users)
+
+    await message.reply(f"✅ User `{user_id}` has been unblocked and is now allowed to use the bot.")
+
 async def cleardbHandler(app: Client, message: Message):
     if message.from_user.id not in Config.ADMIN_IDS:
         await message.reply("❌ You are not authorized to clear the database.")
@@ -178,6 +240,7 @@ app.add_handler(MessageHandler(startHandler, filters.command("start")))
 app.add_handler(MessageHandler(farmHandler, filters.command("farm")))
 app.add_handler(MessageHandler(mylogsHandler, filters.command("mylogs")))
 app.add_handler(MessageHandler(approveHandler, filters.command("approve")))
+app.add_handler(MessageHandler(unblockHandler, filters.command("unblock")))
 app.add_handler(MessageHandler(cleardbHandler, filters.command("cleardb")))
 app.add_handler(PreCheckoutQueryHandler(preCheckout_queryHandler))
 app.add_handler(MessageHandler(successPays, filters.successful_payment))
